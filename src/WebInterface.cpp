@@ -1,0 +1,635 @@
+/**
+ * @file WebInterface.cpp
+ * @brief Implementation of the Web Interface and WiFi Manager
+ * @author Omnimeter Project
+ * @version 1.1.0
+ * 
+ * ============================================================================
+ * OPTIMIZATION CHANGES (v1.1.0):
+ * - Replaced String concatenation in generateJSON() with snprintf char arrays
+ * - Pre-allocated static JSON buffer to prevent heap fragmentation
+ * - AsyncWebServer already non-blocking (verified)
+ * ============================================================================
+ */
+
+#include "WebInterface.h"
+
+// ============================================================================
+// EMBEDDED HTML TEMPLATE
+// ============================================================================
+// This is embedded directly to avoid LittleFS dependency for simple deployments
+// For larger interfaces, consider using LittleFS/SPIFFS
+
+static const char INDEX_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Digital Multimeter</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #e94560;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+        }
+        .subtitle {
+            color: #888;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+        .display {
+            background: #0f0f23;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 25px;
+            border: 2px solid #333;
+        }
+        .voltage-value {
+            font-family: 'Courier New', monospace;
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #00ff88;
+            text-align: center;
+            text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+            letter-spacing: 2px;
+        }
+        .voltage-unit {
+            color: #00ff88;
+            font-size: 1.5rem;
+            margin-left: 5px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .info-box {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+        .info-label {
+            color: #888;
+            font-size: 0.8rem;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .info-value {
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+        }
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff88;
+            animation: pulse 2s infinite;
+        }
+        .status-dot.error {
+            background: #ff4444;
+            animation: none;
+        }
+        .status-dot.warning {
+            background: #ffaa00;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .status-text {
+            color: #888;
+            font-size: 0.85rem;
+        }
+        .range-bar {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+        }
+        .range-label {
+            color: #888;
+            font-size: 0.75rem;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        .range-track {
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .range-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff88, #00cc6a);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .range-fill.high {
+            background: linear-gradient(90deg, #ffaa00, #ff6600);
+        }
+        .range-fill.critical {
+            background: linear-gradient(90deg, #ff4444, #cc0000);
+        }
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #555;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ Omnimeter</h1>
+        <p class="subtitle">ESP32-S2 Precision Digital Multimeter</p>
+        
+        <div class="display">
+            <div class="voltage-value">
+                <span id="voltage">---.---</span><span class="voltage-unit">V</span>
+            </div>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-box">
+                <div class="info-label">Active Range</div>
+                <div class="info-value" id="range">---</div>
+            </div>
+            <div class="info-box">
+                <div class="info-label">ADC Reading</div>
+                <div class="info-value" id="adc">--- mV</div>
+            </div>
+        </div>
+        
+        <div class="range-bar">
+            <div class="range-label">Range Utilization</div>
+            <div class="range-track">
+                <div class="range-fill" id="rangeFill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">Connecting...</span>
+            </div>
+            <span class="status-text" id="updateTime">--</span>
+        </div>
+        
+        <footer>
+            Omnimeter v1.0 | Update Interval: <span id="interval">500</span>ms
+        </footer>
+    </div>
+
+    <script>
+        const UPDATE_INTERVAL = 500;
+        let lastUpdate = 0;
+        let errorCount = 0;
+        
+        function updateDisplay(data) {
+            const voltageEl = document.getElementById('voltage');
+            const rangeEl = document.getElementById('range');
+            const adcEl = document.getElementById('adc');
+            const rangeFill = document.getElementById('rangeFill');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const updateTime = document.getElementById('updateTime');
+            
+            // Update voltage display
+            if (data.valid) {
+                voltageEl.textContent = data.voltage.toFixed(3);
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Live';
+            } else if (data.overrange) {
+                voltageEl.textContent = 'OVR';
+                statusDot.className = 'status-dot warning';
+                statusText.textContent = 'Over Range!';
+            } else {
+                voltageEl.textContent = 'ERR';
+                statusDot.className = 'status-dot error';
+                statusText.textContent = 'Error';
+            }
+            
+            // Update info boxes
+            rangeEl.textContent = data.range;
+            adcEl.textContent = data.adc_mv.toFixed(1) + ' mV';
+            
+            // Calculate range utilization percentage
+            let maxVoltage = 60;
+            switch(data.range) {
+                case '2.5V': maxVoltage = 2.5; break;
+                case '5V': maxVoltage = 5; break;
+                case '10V': maxVoltage = 10; break;
+                case '20V': maxVoltage = 20; break;
+                case '60V': maxVoltage = 60; break;
+            }
+            
+            let utilization = (data.voltage / maxVoltage) * 100;
+            utilization = Math.min(100, Math.max(0, utilization));
+            rangeFill.style.width = utilization + '%';
+            
+            // Color based on utilization
+            rangeFill.className = 'range-fill';
+            if (utilization > 90) {
+                rangeFill.classList.add('critical');
+            } else if (utilization > 75) {
+                rangeFill.classList.add('high');
+            }
+            
+            // Update timestamp
+            const now = new Date();
+            updateTime.textContent = now.toLocaleTimeString();
+            
+            errorCount = 0;
+        }
+        
+        function fetchData() {
+            fetch('/api/voltage')
+                .then(response => {
+                    if (!response.ok) throw new Error('Network error');
+                    return response.json();
+                })
+                .then(data => {
+                    updateDisplay(data);
+                })
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    errorCount++;
+                    if (errorCount > 3) {
+                        document.getElementById('statusDot').className = 'status-dot error';
+                        document.getElementById('statusText').textContent = 'Connection Lost';
+                    }
+                });
+        }
+        
+        // Initial fetch and start interval
+        document.getElementById('interval').textContent = UPDATE_INTERVAL;
+        fetchData();
+        setInterval(fetchData, UPDATE_INTERVAL);
+    </script>
+</body>
+</html>
+)rawliteral";
+
+// ============================================================================
+// CONSTRUCTOR / DESTRUCTOR
+// ============================================================================
+
+WebInterface::WebInterface(Voltmeter& voltmeter)
+    : m_voltmeter(voltmeter)
+    , m_server(nullptr)
+    , m_mode(WiFiOperatingMode::MODE_DISABLED)
+    , m_status(NetworkStatus::STATUS_DISCONNECTED)
+    , m_updateIntervalMs(WEB_UPDATE_INTERVAL_MS)
+    , m_serverRunning(false)
+    , m_lastStatusCheck(0)
+{
+}
+
+WebInterface::~WebInterface() {
+    if (m_server) {
+        m_server->end();
+        delete m_server;
+        m_server = nullptr;
+    }
+    WiFi.disconnect(true);
+}
+
+// ============================================================================
+// PUBLIC METHODS
+// ============================================================================
+
+bool WebInterface::begin(WiFiOperatingMode mode) {
+    m_mode = mode;
+    bool success = false;
+    
+    // Set WiFi mode based on configuration
+    switch (mode) {
+        case WiFiOperatingMode::MODE_AP:
+            WiFi.mode(WIFI_AP);
+            success = initAccessPoint();
+            break;
+            
+        case WiFiOperatingMode::MODE_STATION:
+            WiFi.mode(WIFI_STA);
+            success = initStation();
+            // Fall back to AP mode if station connection fails
+            if (!success) {
+                Serial.println(F("[WebInterface] Station mode failed, falling back to AP mode"));
+                WiFi.mode(WIFI_AP);
+                success = initAccessPoint();
+                m_mode = WiFiOperatingMode::MODE_AP;
+            }
+            break;
+            
+        case WiFiOperatingMode::MODE_AP_STA:
+            WiFi.mode(WIFI_AP_STA);
+            initAccessPoint();
+            success = initStation();
+            if (!success) {
+                // AP is still running even if STA fails
+                success = true;
+            }
+            break;
+            
+        default:
+            WiFi.mode(WIFI_OFF);
+            return false;
+    }
+    
+    if (success) {
+        setupWebServer();
+    }
+    
+    return success;
+}
+
+void WebInterface::loop() {
+    // Non-blocking status monitoring
+    uint32_t now = millis();
+    
+    if (now - m_lastStatusCheck >= 5000) {  // Check every 5 seconds
+        m_lastStatusCheck = now;
+        
+        // Update status based on current WiFi state
+        if (m_mode == WiFiOperatingMode::MODE_STATION || 
+            m_mode == WiFiOperatingMode::MODE_AP_STA) {
+            if (WiFi.status() == WL_CONNECTED) {
+                m_status = NetworkStatus::STATUS_CONNECTED;
+            } else if (WiFi.status() == WL_DISCONNECTED) {
+                m_status = NetworkStatus::STATUS_DISCONNECTED;
+            }
+        }
+        
+        // Log connection info periodically (debug)
+        #if CORE_DEBUG_LEVEL > 0
+        if (m_mode == WiFiOperatingMode::MODE_AP || 
+            m_mode == WiFiOperatingMode::MODE_AP_STA) {
+            Serial.printf("[WebInterface] AP Clients: %d\n", WiFi.softAPgetStationNum());
+        }
+        if (m_mode == WiFiOperatingMode::MODE_STATION && 
+            WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[WebInterface] RSSI: %d dBm\n", WiFi.RSSI());
+        }
+        #endif
+    }
+    
+    // AsyncWebServer handles requests automatically, no polling needed
+}
+
+NetworkStatus WebInterface::getStatus() const {
+    return m_status;
+}
+
+WiFiOperatingMode WebInterface::getMode() const {
+    return m_mode;
+}
+
+String WebInterface::getIPAddress() const {
+    if (m_mode == WiFiOperatingMode::MODE_AP) {
+        return WiFi.softAPIP().toString();
+    } else if (m_mode == WiFiOperatingMode::MODE_STATION && 
+               WiFi.status() == WL_CONNECTED) {
+        return WiFi.localIP().toString();
+    } else if (m_mode == WiFiOperatingMode::MODE_AP_STA) {
+        if (WiFi.status() == WL_CONNECTED) {
+            return WiFi.localIP().toString();
+        }
+        return WiFi.softAPIP().toString();
+    }
+    return "0.0.0.0";
+}
+
+uint8_t WebInterface::getConnectedClients() const {
+    return WiFi.softAPgetStationNum();
+}
+
+bool WebInterface::isServerRunning() const {
+    return m_serverRunning;
+}
+
+void WebInterface::setUpdateInterval(uint32_t intervalMs) {
+    m_updateIntervalMs = intervalMs;
+}
+
+bool WebInterface::connectToNetwork(const char* ssid, const char* password) {
+    Serial.printf("[WebInterface] Connecting to: %s\n", ssid);
+    
+    WiFi.begin(ssid, password);
+    
+    uint32_t startTime = millis();
+    m_status = NetworkStatus::STATUS_CONNECTING;
+    
+    while (WiFi.status() != WL_CONNECTED) {
+        if (millis() - startTime > STA_CONNECT_TIMEOUT_MS) {
+            Serial.println(F("[WebInterface] Connection timeout"));
+            m_status = NetworkStatus::STATUS_ERROR;
+            return false;
+        }
+        delay(100);  // Small delay during connection only
+        Serial.print(".");
+    }
+    
+    Serial.println();
+    Serial.printf("[WebInterface] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    m_status = NetworkStatus::STATUS_CONNECTED;
+    return true;
+}
+
+void WebInterface::disconnect() {
+    WiFi.disconnect();
+    m_status = NetworkStatus::STATUS_DISCONNECTED;
+}
+
+int8_t WebInterface::getRSSI() const {
+    if (WiFi.status() == WL_CONNECTED) {
+        return WiFi.RSSI();
+    }
+    return 0;
+}
+
+// ============================================================================
+// PRIVATE METHODS
+// ============================================================================
+
+bool WebInterface::initAccessPoint() {
+    Serial.println(F("[WebInterface] Starting Access Point..."));
+    
+    // Configure static IP for AP
+    IPAddress apIP(AP_IP_ADDR[0], AP_IP_ADDR[1], AP_IP_ADDR[2], AP_IP_ADDR[3]);
+    IPAddress gateway(AP_GATEWAY[0], AP_GATEWAY[1], AP_GATEWAY[2], AP_GATEWAY[3]);
+    IPAddress subnet(AP_SUBNET[0], AP_SUBNET[1], AP_SUBNET[2], AP_SUBNET[3]);
+    
+    WiFi.softAPConfig(apIP, gateway, subnet);
+    
+    // Start AP with or without password
+    bool success;
+    if (strlen(AP_PASSWORD) >= 8) {
+        success = WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONNECTIONS);
+    } else {
+        success = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, AP_HIDDEN, AP_MAX_CONNECTIONS);
+    }
+    
+    if (success) {
+        Serial.println(F("[WebInterface] Access Point started successfully"));
+        Serial.printf("[WebInterface] SSID: %s\n", AP_SSID);
+        Serial.printf("[WebInterface] IP Address: %s\n", WiFi.softAPIP().toString().c_str());
+        m_status = NetworkStatus::STATUS_AP_ACTIVE;
+    } else {
+        Serial.println(F("[WebInterface] Failed to start Access Point"));
+        m_status = NetworkStatus::STATUS_ERROR;
+    }
+    
+    return success;
+}
+
+bool WebInterface::initStation() {
+    if (!WIFI_STA_ENABLED) {
+        Serial.println(F("[WebInterface] Station mode disabled in configuration"));
+        return false;
+    }
+    
+    return connectToNetwork(STA_SSID, STA_PASSWORD);
+}
+
+void WebInterface::setupWebServer() {
+    if (m_server) {
+        delete m_server;
+    }
+    
+    m_server = new AsyncWebServer(WEB_SERVER_PORT);
+    
+    // Route: Root page (/)
+    m_server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleRoot(request);
+    });
+    
+    // Route: API endpoint for voltage data
+    m_server->on("/api/voltage", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleAPI(request);
+    });
+    
+    // Route: Health check endpoint
+    m_server->on("/health", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "text/plain", "OK");
+    });
+    
+    // Route: Device info endpoint
+    m_server->on("/api/info", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        // Use static buffer to avoid heap fragmentation
+        static char infoBuffer[200];
+        snprintf(infoBuffer, sizeof(infoBuffer),
+            "{\"device\":\"ESP32-S2 Multimeter\",\"version\":\"1.1.0\",\"ip\":\"%s\",\"uptime\":%lu,\"heap\":%u,\"rssi\":%d}",
+            getIPAddress().c_str(),
+            millis() / 1000,
+            ESP.getFreeHeap(),
+            getRSSI()
+        );
+        request->send(200, "application/json", infoBuffer);
+    });
+    
+    // 404 handler
+    m_server->onNotFound([this](AsyncWebServerRequest* request) {
+        handleNotFound(request);
+    });
+    
+    // Start server
+    m_server->begin();
+    m_serverRunning = true;
+    
+    Serial.println(F("[WebInterface] Web server started"));
+    Serial.printf("[WebInterface] Access at: http://%s/\n", getIPAddress().c_str());
+}
+
+String WebInterface::generateHTML() {
+    // Return the embedded HTML
+    return String(INDEX_HTML);
+}
+
+String WebInterface::generateJSON() {
+    const MeasurementResult& result = m_voltmeter.getLastMeasurement();
+    
+    // Use static buffer to avoid heap fragmentation
+    // Format: {"voltage":XX.XXXX,"adc_mv":XXXX.XX,"range":"XXXXX","valid":XXXXX,"overrange":XXXXX,"timestamp":XXXXXXXXXX}
+    static char jsonBuffer[160];
+    
+    snprintf(jsonBuffer, sizeof(jsonBuffer),
+        "{\"voltage\":%.4f,\"adc_mv\":%.2f,\"range\":\"%s\",\"valid\":%s,\"overrange\":%s,\"timestamp\":%u}",
+        result.voltage,
+        result.rawAdcMillivolts,
+        Voltmeter::getRangeString(result.activeRange),
+        result.valid ? "true" : "false",
+        result.overrange ? "true" : "false",
+        (unsigned int)result.timestamp
+    );
+    
+    return String(jsonBuffer);
+}
+
+void WebInterface::handleRoot(AsyncWebServerRequest* request) {
+    // Send HTML directly from PROGMEM
+    request->send(200, "text/html", FPSTR(INDEX_HTML));
+}
+
+void WebInterface::handleAPI(AsyncWebServerRequest* request) {
+    // Take a fresh measurement for the API response
+    m_voltmeter.measure();
+    
+    String json = generateJSON();
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", json);
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+}
+
+void WebInterface::handleNotFound(AsyncWebServerRequest* request) {
+    String message = "404 Not Found\n\n";
+    message += "URI: " + request->url() + "\n";
+    message += "Method: " + String((request->method() == HTTP_GET) ? "GET" : "POST") + "\n";
+    
+    request->send(404, "text/plain", message);
+}
