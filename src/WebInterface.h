@@ -22,25 +22,55 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+#include <LittleFS.h>
 #include "Voltmeter.h"
+
+// Include secrets if available (defines WIFI_STA_SSID, WIFI_STA_PASSWORD)
+#if __has_include("secrets.h")
+    #include "secrets.h"
+#endif
 
 // ============================================================================
 // NETWORK CONFIGURATION
 // ============================================================================
 
 // Access Point (AP) Mode Configuration
-constexpr const char* AP_SSID = "ESP_Multimeter";
-constexpr const char* AP_PASSWORD = "12345678";  // Min 8 characters, empty for open network
+// Use build-time macros if defined, otherwise use defaults
+#ifndef WIFI_AP_SSID
+    #define WIFI_AP_SSID "ESP_Multimeter"
+#endif
+#ifndef WIFI_AP_PASSWORD
+    #define WIFI_AP_PASSWORD "12345678"
+#endif
+
+constexpr const char* AP_SSID = WIFI_AP_SSID;
+constexpr const char* AP_PASSWORD = WIFI_AP_PASSWORD;  // Min 8 characters, empty for open network
 constexpr uint8_t AP_CHANNEL = 1;
 constexpr bool AP_HIDDEN = false;
 constexpr uint8_t AP_MAX_CONNECTIONS = 4;
 
 // Station (STA) Mode Configuration
 // Set WIFI_STA_ENABLED to true and configure credentials to connect to existing network
+#ifndef WIFI_STA_SSID
+    #define WIFI_STA_SSID "YourNetworkSSID"
+#endif
+#ifndef WIFI_STA_PASSWORD
+    #define WIFI_STA_PASSWORD "YourNetworkPassword"
+#endif
+
 constexpr bool WIFI_STA_ENABLED = false;
-constexpr const char* STA_SSID = "YourNetworkSSID";
-constexpr const char* STA_PASSWORD = "YourNetworkPassword";
+constexpr const char* STA_SSID = WIFI_STA_SSID;
+constexpr const char* STA_PASSWORD = WIFI_STA_PASSWORD;
 constexpr uint32_t STA_CONNECT_TIMEOUT_MS = 15000;  // 15 second timeout
+
+// mDNS Configuration
+constexpr const char* MDNS_HOSTNAME = "omnimeter";
+
+// OTA Configuration
+constexpr const char* OTA_PASSWORD = "omnimeter";
+constexpr uint16_t OTA_PORT = 3232;
 
 // Web Server Configuration
 constexpr uint16_t WEB_SERVER_PORT = 80;
@@ -176,6 +206,17 @@ private:
      * @return true if connection successful
      */
     bool initStation();
+
+    /**
+     * @brief Initialize mDNS responder
+     * @return true if successful
+     */
+    bool initMDNS();
+
+    /**
+     * @brief Initialize OTA update handler
+     */
+    void initOTA();
 
     /**
      * @brief Configure and start the async web server

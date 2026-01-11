@@ -25,6 +25,8 @@ Voltmeter::Voltmeter()
     , m_lastResult{0.0f, 0.0f, VoltageRange::RANGE_INVALID, false, false, 0}
     , m_currentRange(VoltageRange::RANGE_60V)
     , m_rangeStableCount(0)
+    , m_emaVoltage(0.0f)
+    , m_emaInitialized(false)
 {
     // Initialize runtime calibration to SAFE DEFAULTS
     // Critical: gain = 1.0 ensures device works even without calibration
@@ -44,6 +46,7 @@ bool Voltmeter::begin() {
     
     // Set ADC attenuation for ~2.5V max input range
     // ADC_11db attenuation gives approximately 0-2500mV range
+    // Note: This is labeled as ~12dB in hardware but API uses ADC_11db constant
     analogSetAttenuation(ADC_11db);
     
     // Configure individual pins
@@ -154,6 +157,20 @@ MeasurementResult Voltmeter::measure() {
 // ============================================================================
 MeasurementResult Voltmeter::setResult(float voltage, float adcMv, 
                                         VoltageRange range, bool valid, bool overrange) {
+    // Apply EMA filter for smoothing (only for valid measurements)
+    if (valid && !overrange) {
+        if (!m_emaInitialized) {
+            // First valid measurement - initialize EMA with raw value
+            m_emaVoltage = voltage;
+            m_emaInitialized = true;
+        } else {
+            // EMA formula: filtered = alpha * new_value + (1 - alpha) * old_filtered
+            m_emaVoltage = EMA_ALPHA * voltage + (1.0f - EMA_ALPHA) * m_emaVoltage;
+        }
+        // Use smoothed voltage for the result
+        voltage = m_emaVoltage;
+    }
+    
     m_lastResult.voltage = voltage;
     m_lastResult.rawAdcMillivolts = adcMv;
     m_lastResult.activeRange = range;

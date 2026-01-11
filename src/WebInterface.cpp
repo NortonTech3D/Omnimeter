@@ -15,301 +15,18 @@
 #include "WebInterface.h"
 
 // ============================================================================
-// EMBEDDED HTML TEMPLATE
+// FALLBACK HTML (used if LittleFS file not found)
 // ============================================================================
-// This is embedded directly to avoid LittleFS dependency for simple deployments
-// For larger interfaces, consider using LittleFS/SPIFFS
 
-static const char INDEX_HTML[] PROGMEM = R"rawliteral(
+static const char FALLBACK_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Digital Multimeter</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        .container {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            max-width: 500px;
-            width: 100%;
-        }
-        h1 {
-            color: #e94560;
-            text-align: center;
-            margin-bottom: 10px;
-            font-size: 1.8rem;
-        }
-        .subtitle {
-            color: #888;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 0.9rem;
-        }
-        .display {
-            background: #0f0f23;
-            border-radius: 15px;
-            padding: 30px;
-            margin-bottom: 25px;
-            border: 2px solid #333;
-        }
-        .voltage-value {
-            font-family: 'Courier New', monospace;
-            font-size: 3.5rem;
-            font-weight: bold;
-            color: #00ff88;
-            text-align: center;
-            text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
-            letter-spacing: 2px;
-        }
-        .voltage-unit {
-            color: #00ff88;
-            font-size: 1.5rem;
-            margin-left: 5px;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .info-box {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            padding: 15px;
-            text-align: center;
-        }
-        .info-label {
-            color: #888;
-            font-size: 0.8rem;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .info-value {
-            color: #fff;
-            font-size: 1.2rem;
-            font-weight: 600;
-        }
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 10px;
-        }
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #00ff88;
-            animation: pulse 2s infinite;
-        }
-        .status-dot.error {
-            background: #ff4444;
-            animation: none;
-        }
-        .status-dot.warning {
-            background: #ffaa00;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .status-text {
-            color: #888;
-            font-size: 0.85rem;
-        }
-        .range-bar {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 10px;
-        }
-        .range-label {
-            color: #888;
-            font-size: 0.75rem;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-        }
-        .range-track {
-            height: 8px;
-            background: #333;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .range-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00ff88, #00cc6a);
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-        .range-fill.high {
-            background: linear-gradient(90deg, #ffaa00, #ff6600);
-        }
-        .range-fill.critical {
-            background: linear-gradient(90deg, #ff4444, #cc0000);
-        }
-        footer {
-            text-align: center;
-            margin-top: 20px;
-            color: #555;
-            font-size: 0.75rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>⚡ Omnimeter</h1>
-        <p class="subtitle">ESP32-S2 Precision Digital Multimeter</p>
-        
-        <div class="display">
-            <div class="voltage-value">
-                <span id="voltage">---.---</span><span class="voltage-unit">V</span>
-            </div>
-        </div>
-        
-        <div class="info-grid">
-            <div class="info-box">
-                <div class="info-label">Active Range</div>
-                <div class="info-value" id="range">---</div>
-            </div>
-            <div class="info-box">
-                <div class="info-label">ADC Reading</div>
-                <div class="info-value" id="adc">--- mV</div>
-            </div>
-        </div>
-        
-        <div class="range-bar">
-            <div class="range-label">Range Utilization</div>
-            <div class="range-track">
-                <div class="range-fill" id="rangeFill" style="width: 0%"></div>
-            </div>
-        </div>
-        
-        <div class="status-bar">
-            <div class="status-indicator">
-                <div class="status-dot" id="statusDot"></div>
-                <span class="status-text" id="statusText">Connecting...</span>
-            </div>
-            <span class="status-text" id="updateTime">--</span>
-        </div>
-        
-        <footer>
-            Omnimeter v1.0 | Update Interval: <span id="interval">500</span>ms
-        </footer>
-    </div>
-
-    <script>
-        const UPDATE_INTERVAL = 500;
-        let lastUpdate = 0;
-        let errorCount = 0;
-        
-        function updateDisplay(data) {
-            const voltageEl = document.getElementById('voltage');
-            const rangeEl = document.getElementById('range');
-            const adcEl = document.getElementById('adc');
-            const rangeFill = document.getElementById('rangeFill');
-            const statusDot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
-            const updateTime = document.getElementById('updateTime');
-            
-            // Update voltage display
-            if (data.valid) {
-                voltageEl.textContent = data.voltage.toFixed(3);
-                statusDot.className = 'status-dot';
-                statusText.textContent = 'Live';
-            } else if (data.overrange) {
-                voltageEl.textContent = 'OVR';
-                statusDot.className = 'status-dot warning';
-                statusText.textContent = 'Over Range!';
-            } else {
-                voltageEl.textContent = 'ERR';
-                statusDot.className = 'status-dot error';
-                statusText.textContent = 'Error';
-            }
-            
-            // Update info boxes
-            rangeEl.textContent = data.range;
-            adcEl.textContent = data.adc_mv.toFixed(1) + ' mV';
-            
-            // Calculate range utilization percentage
-            let maxVoltage = 60;
-            switch(data.range) {
-                case '2.5V': maxVoltage = 2.5; break;
-                case '5V': maxVoltage = 5; break;
-                case '10V': maxVoltage = 10; break;
-                case '20V': maxVoltage = 20; break;
-                case '60V': maxVoltage = 60; break;
-            }
-            
-            let utilization = (data.voltage / maxVoltage) * 100;
-            utilization = Math.min(100, Math.max(0, utilization));
-            rangeFill.style.width = utilization + '%';
-            
-            // Color based on utilization
-            rangeFill.className = 'range-fill';
-            if (utilization > 90) {
-                rangeFill.classList.add('critical');
-            } else if (utilization > 75) {
-                rangeFill.classList.add('high');
-            }
-            
-            // Update timestamp
-            const now = new Date();
-            updateTime.textContent = now.toLocaleTimeString();
-            
-            errorCount = 0;
-        }
-        
-        function fetchData() {
-            fetch('/api/voltage')
-                .then(response => {
-                    if (!response.ok) throw new Error('Network error');
-                    return response.json();
-                })
-                .then(data => {
-                    updateDisplay(data);
-                })
-                .catch(error => {
-                    console.error('Fetch error:', error);
-                    errorCount++;
-                    if (errorCount > 3) {
-                        document.getElementById('statusDot').className = 'status-dot error';
-                        document.getElementById('statusText').textContent = 'Connection Lost';
-                    }
-                });
-        }
-        
-        // Initial fetch and start interval
-        document.getElementById('interval').textContent = UPDATE_INTERVAL;
-        fetchData();
-        setInterval(fetchData, UPDATE_INTERVAL);
-    </script>
+<html>
+<head><title>Omnimeter</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:50px;">
+<h1>Omnimeter</h1>
+<p>LittleFS not mounted or index.html missing.</p>
+<p>Upload filesystem with: <code>pio run --target uploadfs</code></p>
+<p><a href="/api/voltage">View JSON API</a></p>
 </body>
 </html>
 )rawliteral";
@@ -381,6 +98,8 @@ bool WebInterface::begin(WiFiOperatingMode mode) {
     }
     
     if (success) {
+        initMDNS();
+        initOTA();
         setupWebServer();
     }
     
@@ -535,6 +254,66 @@ bool WebInterface::initStation() {
     return connectToNetwork(STA_SSID, STA_PASSWORD);
 }
 
+bool WebInterface::initMDNS() {
+    Serial.println(F("[WebInterface] Starting mDNS responder..."));
+    
+    if (!MDNS.begin(MDNS_HOSTNAME)) {
+        Serial.println(F("[WebInterface] ERROR: mDNS responder failed to start"));
+        return false;
+    }
+    
+    // Add HTTP service to mDNS
+    MDNS.addService("http", "tcp", WEB_SERVER_PORT);
+    
+    Serial.printf("[WebInterface] mDNS started: http://%s.local/\n", MDNS_HOSTNAME);
+    return true;
+}
+
+void WebInterface::initOTA() {
+    Serial.println(F("[WebInterface] Configuring OTA updates..."));
+    
+    ArduinoOTA.setHostname(MDNS_HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.setPort(OTA_PORT);
+    
+    ArduinoOTA.onStart([]() {
+        String type = (ArduinoOTA.getCommand() == U_FLASH) ? "firmware" : "filesystem";
+        Serial.printf("[OTA] Starting %s update...\n", type.c_str());
+        // Unmount LittleFS during filesystem update
+        if (ArduinoOTA.getCommand() == U_SPIFFS) {
+            LittleFS.end();
+        }
+    });
+    
+    ArduinoOTA.onEnd([]() {
+        Serial.println(F("\n[OTA] Update complete! Rebooting..."));
+    });
+    
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        static uint8_t lastPercent = 0;
+        uint8_t percent = (progress * 100) / total;
+        if (percent != lastPercent && percent % 10 == 0) {
+            Serial.printf("[OTA] Progress: %u%%\n", percent);
+            lastPercent = percent;
+        }
+    });
+    
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("[OTA] Error[%u]: ", error);
+        switch (error) {
+            case OTA_AUTH_ERROR:    Serial.println(F("Auth Failed")); break;
+            case OTA_BEGIN_ERROR:   Serial.println(F("Begin Failed")); break;
+            case OTA_CONNECT_ERROR: Serial.println(F("Connect Failed")); break;
+            case OTA_RECEIVE_ERROR: Serial.println(F("Receive Failed")); break;
+            case OTA_END_ERROR:     Serial.println(F("End Failed")); break;
+            default:                Serial.println(F("Unknown")); break;
+        }
+    });
+    
+    ArduinoOTA.begin();
+    Serial.printf("[WebInterface] OTA ready on port %d (password protected)\n", OTA_PORT);
+}
+
 void WebInterface::setupWebServer() {
     if (m_server) {
         delete m_server;
@@ -585,8 +364,8 @@ void WebInterface::setupWebServer() {
 }
 
 String WebInterface::generateHTML() {
-    // Return the embedded HTML
-    return String(INDEX_HTML);
+    // Return the fallback HTML (used when LittleFS not available)
+    return String(FPSTR(FALLBACK_HTML));
 }
 
 String WebInterface::generateJSON() {
@@ -610,8 +389,13 @@ String WebInterface::generateJSON() {
 }
 
 void WebInterface::handleRoot(AsyncWebServerRequest* request) {
-    // Send HTML directly from PROGMEM
-    request->send(200, "text/html", FPSTR(INDEX_HTML));
+    // Try to serve from LittleFS first
+    if (LittleFS.exists("/index.html")) {
+        request->send(LittleFS, "/index.html", "text/html");
+    } else {
+        // Fallback to minimal HTML if file not found
+        request->send(200, "text/html", FPSTR(FALLBACK_HTML));
+    }
 }
 
 void WebInterface::handleAPI(AsyncWebServerRequest* request) {

@@ -1,0 +1,26 @@
+; ============================================================================
+; Omnimeter - WiFi Credentials Override
+; ============================================================================
+; Copy this file to 'platformio_override.ini' and set your WiFi credentials.
+; The override file is gitignored and will not be committed.
+;
+; Usage:
+;   1. Copy this file: cp platformio_override.ini.example platformio_override.ini
+;   2. Edit platformio_override.ini with your credentials
+;   3. Build and upload: pio run --target upload
+;
+; Alternatively, set environment variables before building:
+;   export BUILD_FLAGS="-DWIFI_AP_SSID='\"MyNetwork\"' -DWIFI_AP_PASSWORD='\"MyPassword\"'"
+;   pio run --target upload
+; ============================================================================
+
+[env]
+build_flags = 
+    ${env.build_flags}
+    ; Access Point credentials (for standalone mode)
+    -DWIFI_AP_SSID='"Omnimeter"'
+    -DWIFI_AP_PASSWORD='"omnimeter123"'
+    ; Station mode credentials (to connect to your home WiFi)
+    ; Uncomment and set these to connect to an existing network:
+    ; -DWIFI_STA_SSID='"YourHomeWiFi"'
+    ; -DWIFI_STA_PASSWORD='"YourHomePassword"'

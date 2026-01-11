@@ -3,3 +3,16 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Secrets - NEVER commit credentials
+include/secrets.h
+secrets.h
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db

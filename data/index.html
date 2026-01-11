@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Digital Multimeter</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -26,7 +27,7 @@
             padding: 40px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.1);
-            max-width: 500px;
+            max-width: 700px;
             width: 100%;
         }
         h1 {
@@ -85,6 +86,24 @@
             color: #fff;
             font-size: 1.2rem;
             font-weight: 600;
+        }
+        .chart-container {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+        }
+        .chart-title {
+            color: #888;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        #voltageChart {
+            max-height: 200px;
         }
         .status-bar {
             display: flex;
@@ -157,6 +176,9 @@
             color: #555;
             font-size: 0.75rem;
         }
+        footer a {
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +203,11 @@
             </div>
         </div>
         
+        <div class="chart-container">
+            <div class="chart-title">Voltage History (60 seconds)</div>
+            <canvas id="voltageChart"></canvas>
+        </div>
+        
         <div class="range-bar">
             <div class="range-label">Range Utilization</div>
             <div class="range-track">
@@ -197,14 +224,120 @@
         </div>
         
         <footer>
-            Omnimeter v1.0 | Update Interval: <span id="interval">500</span>ms
+            Omnimeter v1.1 | Update Interval: <span id="interval">500</span>ms | <a href="/api/voltage">API</a>
         </footer>
     </div>
 
     <script>
-        const UPDATE_INTERVAL = 500;
-        let lastUpdate = 0;
+        const UPDATE_INTERVAL = 500;  // milliseconds
+        const CHART_WINDOW_SECONDS = 60;
+        const MAX_DATA_POINTS = Math.floor((CHART_WINDOW_SECONDS * 1000) / UPDATE_INTERVAL);
+        
         let errorCount = 0;
+        let voltageData = [];
+        let timeLabels = [];
+        let chart = null;
+        
+        // Initialize Chart.js
+        function initChart() {
+            const ctx = document.getElementById('voltageChart').getContext('2d');
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timeLabels,
+                    datasets: [{
+                        label: 'Voltage (V)',
+                        data: voltageData,
+                        borderColor: '#00ff88',
+                        backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    animation: {
+                        duration: 0  // Disable animation for smoother updates
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#00ff88',
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) {
+                                    return context.parsed.y.toFixed(4) + ' V';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: '#666',
+                                maxTicksLimit: 6,
+                                maxRotation: 0
+                            }
+                        },
+                        y: {
+                            display: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.1)'
+                            },
+                            ticks: {
+                                color: '#666',
+                                callback: function(value) {
+                                    return value.toFixed(2) + 'V';
+                                }
+                            },
+                            suggestedMin: 0
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateChart(voltage) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { 
+                hour12: false, 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+            
+            // Add new data point
+            voltageData.push(voltage);
+            timeLabels.push(timeStr);
+            
+            // Remove old data points to maintain rolling window
+            while (voltageData.length > MAX_DATA_POINTS) {
+                voltageData.shift();
+                timeLabels.shift();
+            }
+            
+            // Update chart
+            chart.data.labels = timeLabels;
+            chart.data.datasets[0].data = voltageData;
+            chart.update('none');  // 'none' disables animation for this update
+        }
         
         function updateDisplay(data) {
             const voltageEl = document.getElementById('voltage');
@@ -220,6 +353,9 @@
                 voltageEl.textContent = data.voltage.toFixed(3);
                 statusDot.className = 'status-dot';
                 statusText.textContent = 'Live';
+                
+                // Update chart with new voltage reading
+                updateChart(data.voltage);
             } else if (data.overrange) {
                 voltageEl.textContent = 'OVR';
                 statusDot.className = 'status-dot warning';
@@ -282,10 +418,13 @@
                 });
         }
         
-        // Initial fetch and start interval
-        document.getElementById('interval').textContent = UPDATE_INTERVAL;
-        fetchData();
-        setInterval(fetchData, UPDATE_INTERVAL);
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('interval').textContent = UPDATE_INTERVAL;
+            initChart();
+            fetchData();
+            setInterval(fetchData, UPDATE_INTERVAL);
+        });
     </script>
 </body>
 </html>

@@ -95,6 +95,11 @@ constexpr float    ADC_SATURATION_MARGIN = 0.95f;   // 95% of max = saturation t
 // Saturation threshold in millivolts (below this, reading is valid)
 constexpr float ADC_SATURATION_MV = ADC_REFERENCE_VOLTAGE * ADC_SATURATION_MARGIN;  // ~2375mV
 
+// Exponential Moving Average (EMA) filter
+// Alpha = 0.2 means ~20% new value, ~80% previous value
+// Lower alpha = smoother but slower response
+constexpr float EMA_ALPHA = 0.2f;
+
 // ============================================================================
 // AUTO-RANGING HYSTERESIS CONFIGURATION
 // ============================================================================
@@ -336,6 +341,10 @@ private:
     // Runtime calibration values (can be updated by CalibrationManager)
     float m_calOffsets[5];                 ///< Per-range calibration offsets
     float m_calGains[5];                   ///< Per-range calibration gains
+    
+    // EMA filter state
+    float m_emaVoltage;                    ///< Smoothed voltage (EMA filtered)
+    bool m_emaInitialized;                 ///< True after first measurement
     
     // ========================================================================
     // PRIVATE HELPER METHODS (reduce code duplication)

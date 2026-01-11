@@ -61,6 +61,8 @@
  */
 
 #include <Arduino.h>
+#include <LittleFS.h>
+#include <ArduinoOTA.h>
 #include "Voltmeter.h"
 #include "WebInterface.h"
 #include "Calibration.h"
@@ -226,6 +228,11 @@ void loop() {
     processSerialCommands();
     
     // ========================================================================
+    // Task 6: OTA Update Handler
+    // ========================================================================
+    ArduinoOTA.handle();
+    
+    // ========================================================================
     // Yield to system tasks (WiFi, etc.)
     // ========================================================================
     yield();
@@ -253,6 +260,18 @@ void initializeHardware() {
  */
 void initializeSubsystems() {
     Serial.println(F("[Main] Initializing subsystems..."));
+    printDivider();
+    
+    // Initialize LittleFS filesystem
+    Serial.println(F("[Main] Mounting LittleFS..."));
+    if (!LittleFS.begin(true)) {  // true = format on failure
+        Serial.println(F("[Main] ERROR: LittleFS mount failed!"));
+    } else {
+        Serial.println(F("[Main] LittleFS mounted successfully"));
+        Serial.printf("[Main] LittleFS Total: %u bytes, Used: %u bytes\n",
+                      LittleFS.totalBytes(), LittleFS.usedBytes());
+    }
+    
     printDivider();
     
     // Initialize Voltmeter (ADC)
